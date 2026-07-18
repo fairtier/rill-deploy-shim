@@ -33,6 +33,14 @@ jobs:
           go-version: "1.26"
       - run: go build ./...
       - run: go test ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+      # Enforce the // @ts-check JSDoc types in deployshim.js (editors check
+      # them via the TS language server, but only CI makes them binding).
+      - name: Typecheck deployshim.js
+        run: npx -y -p typescript tsc --noEmit --allowJs --checkJs --strict --target es2022 --lib es2022,dom deployshim.js
 
   build:
     needs: test
