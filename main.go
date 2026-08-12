@@ -19,15 +19,18 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/signal"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -63,11 +66,33 @@ func env(key, def string) string {
 	return def
 }
 
+// shutdownTimeout bounds the graceful drain. It must stay comfortably below
+// the pod's terminationGracePeriodSeconds (30s) so we always finish on our own
+// terms rather than being SIGKILLed mid-drain.
+const shutdownTimeout = 10 * time.Second
+
 func main() {
-	cfg := loadConfig()
+	// Catch SIGTERM ourselves. Without this the shim is PID 1 in a distroless
+	// container with no handler installed, so the kernel ignores the default
+	// disposition, Go's runtime.dieFromSignal falls through to its `exit(2)`
+	// fallback, and every ordinary kubelet-initiated stop is recorded as
+	// "Error (exit 2)" with no log line — indistinguishable from a crash.
+	// That misreading cost a real investigation: 204 restarts were read as a
+	// crashloop when they were routine restarts during node memory pressure.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	if err := run(ctx, loadConfig()); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run serves until ctx is cancelled, then drains and returns nil. Any error
+// returned is a genuine failure worth a non-zero exit.
+func run(ctx context.Context, cfg config) error {
 	handler, err := newHandler(cfg)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if cfg.snapshotToken == "" {
 		// Not fatal: the proxy still serves Rill; only /__ft/deploy fails
@@ -81,10 +106,35 @@ func main() {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("rill-deploy-shim listening on %s -> %s (snapshot %s)", cfg.listenAddr, cfg.rillUpstream, cfg.snapshotURL)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal(err)
+
+	serveErr := make(chan error, 1)
+	go func() {
+		log.Printf("rill-deploy-shim listening on %s -> %s (snapshot %s)", cfg.listenAddr, cfg.rillUpstream, cfg.snapshotURL)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
+			return
+		}
+		serveErr <- nil
+	}()
+
+	select {
+	case err := <-serveErr:
+		return err
+	case <-ctx.Done():
 	}
+
+	log.Print("signal received, draining")
+	sctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(sctx); err != nil {
+		// Expected whenever a Rill SSE stream is open: a hijacked/streaming
+		// connection never goes idle, so Shutdown waits out the full timeout.
+		// Force it closed rather than hang until the SIGKILL.
+		log.Printf("graceful shutdown incomplete (%v), closing", err)
+		_ = srv.Close()
+	}
+	log.Print("shutdown complete")
+	return nil
 }
 
 // newHandler builds the full request mux: the two /__ft/* routes plus a

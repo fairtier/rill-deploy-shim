@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // newHandler against a fake Rill upstream + fake snapshot sidecar.
@@ -182,6 +185,69 @@ func TestDeployMissingTokenIs503(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("want 503, got %d", rec.Code)
 	}
+}
+
+// A cancelled context must produce a clean return, not a crash. In production
+// this is the difference between a legible "exit 0" and the silent "exit 2"
+// that Go's PID-1 signal fallback produces when nothing handles SIGTERM.
+func TestRunShutsDownCleanlyOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	addr := freeAddr(t)
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, config{listenAddr: addr, rillUpstream: "http://unused", snapshotURL: "http://unused", snapshotToken: "tok"}) }()
+
+	waitListening(t, addr)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run returned %v, want nil (a clean drain)", err)
+		}
+	case <-time.After(shutdownTimeout + 5*time.Second):
+		t.Fatal("run did not return after context cancellation")
+	}
+}
+
+// A serve failure (here: an address already in use) must surface as an error
+// so main can exit non-zero, rather than being swallowed by the drain path.
+func TestRunReturnsListenError(t *testing.T) {
+	addr := freeAddr(t)
+	blocker, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = blocker.Close() }()
+
+	if err := run(context.Background(), config{listenAddr: addr, rillUpstream: "http://unused", snapshotToken: "tok"}); err == nil {
+		t.Fatal("run returned nil for an unusable listen address")
+	}
+}
+
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := l.Addr().String()
+	_ = l.Close()
+	return addr
+}
+
+func waitListening(t *testing.T, addr string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		c, err := net.DialTimeout("tcp", addr, time.Second)
+		if err == nil {
+			_ = c.Close()
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("server never came up on %s", addr)
 }
 
 func TestDeployRejectsGET(t *testing.T) {
