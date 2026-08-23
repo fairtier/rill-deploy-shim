@@ -29,14 +29,20 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          # Match go.mod.
-          go-version: "1.26"
+          # Read the version from go.mod rather than repeating it here — one
+          # hand-maintained copy (the Dockerfile ARG) is enough.
+          go-version-file: go.mod
       - run: go build ./...
       - run: go test ./...
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Pinned rather than floating on latest: the config enables the
+          # gofumpt formatter, and a linter bump can add formatting rules that
+          # turn an unrelated push red. It is also a hard floor — golangci-lint
+          # refuses to run when the Go it was built with is below the module's
+          # `go` directive, so a 1.27 go.mod needs a 1.27-built linter.
+          version: v2.13.1
       # Enforce the // @ts-check JSDoc types in deployshim.js (editors check
       # them via the TS language server, but only CI makes them binding).
       - name: Typecheck deployshim.js

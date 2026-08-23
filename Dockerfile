@@ -1,8 +1,14 @@
 ############################
 # STEP 0 build arguments
 ############################
-# Pin the Go toolchain version.
-ARG GO_VERSION=1.26.4
+# Pin the Go toolchain to a MINOR version, not a full patch version. This repo
+# has no Dependabot, and the image is only rebuilt on a release tag, so a full
+# patch pin here is a value nothing updates: 1.26.4 sat in this ARG long enough
+# to miss the 1.26.5/1.26.6 stdlib batch (GO-2026-5026, GO-2026-5972,
+# GO-2026-6088..6091) and kept shipping an unpatched binary. `1.27` resolves to
+# the newest 1.27.x at build time, which is what you want when builds are rare.
+# Move it with the `go` directive in go.mod.
+ARG GO_VERSION=1.27
 ARG BASE_VARIANT=trixie
 
 ############################

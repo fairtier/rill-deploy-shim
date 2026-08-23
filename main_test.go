@@ -195,7 +195,9 @@ func TestRunShutsDownCleanlyOnCancel(t *testing.T) {
 
 	addr := freeAddr(t)
 	done := make(chan error, 1)
-	go func() { done <- run(ctx, config{listenAddr: addr, rillUpstream: "http://unused", snapshotURL: "http://unused", snapshotToken: "tok"}) }()
+	go func() {
+		done <- run(ctx, config{listenAddr: addr, rillUpstream: "http://unused", snapshotURL: "http://unused", snapshotToken: "tok"})
+	}()
 
 	waitListening(t, addr)
 	cancel()
