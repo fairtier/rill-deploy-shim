@@ -1,5 +1,5 @@
 version: 2
-# Actions are pinned by commit SHA with a `# vN` comment. Dependabot rewrites
+# Actions are pinned by commit SHA with a `# v<semver>` comment. Dependabot rewrites
 # both halves, so the pin stays readable without going stale — and unlike a
 # `@vN` tag pin, a SHA pin makes every release visible, not just majors.
 # The default open-PR limit of 5 per ecosystem silently withholds the rest.
