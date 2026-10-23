@@ -42,7 +42,7 @@ jobs:
           # turn an unrelated push red. It is also a hard floor — golangci-lint
           # refuses to run when the Go it was built with is below the module's
           # `go` directive, so a 1.27 go.mod needs a 1.27-built linter.
-          version: v2.13.2
+          version: v2.15.0
       # Enforce the // @ts-check JSDoc types in deployshim.js (editors check
       # them via the TS language server, but only CI makes them binding).
       - name: Typecheck deployshim.js
@@ -59,7 +59,7 @@ jobs:
         # v0.1.0 -> 0.1.0
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -69,7 +69,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: true
